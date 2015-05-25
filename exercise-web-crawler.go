@@ -15,33 +15,38 @@ type Cache map[string]string
 // Crawl uses fetcher to recursively crawl
 // pages starting with url, to a maximum of depth.
 func Crawl(url string, depth int, fetcher Fetcher, c chan Cache) {
+	if depth <= 0 {
+		t := <-c
+		c <- t
+		return
+	}
+	body, urls, err := fetcher.Fetch(url)
+	if err != nil {
+		fmt.Println(err)
+		t := <-c
+		c <- t
+		return
+	}
+	fmt.Printf("found: %s %q\n", url, body)
 	// Only one goroutine have access to this data at some moment.
 	cache := <-c
 	//fmt.Printf("%s: %v\n", url, cache)
-	if depth > 0 {
-		body, urls, err := fetcher.Fetch(url)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			fmt.Printf("found: %s %q\n", url, body)
-			var newurls []string
-			for _, u := range urls {
-				if _, status := cache[u]; !status {
-					cache[u] = "done"
-					newurls = append(newurls, u)
-				}
-			}
-			if len(newurls) > 0 {
-				children := make(chan Cache)
-				for _, u := range newurls {
-					go Crawl(u, depth-1, fetcher, children)
-				}
-				// Now all goroutines are waiting for some value on "children".
-				children <- cache
-				// The parent goroutine will be the last to have access to the channel.
-				<-children
-			}
+	var newurls []string
+	for _, u := range urls {
+		if _, status := cache[u]; !status {
+			cache[u] = "done"
+			newurls = append(newurls, u)
 		}
+	}
+	if len(newurls) > 0 {
+		children := make(chan Cache)
+		for _, u := range newurls {
+			go Crawl(u, depth-1, fetcher, children)
+		}
+		// Now all goroutines are waiting for some value on "children".
+		children <- cache
+		// The parent goroutine will be the last to have access to the channel.
+		<-children
 	}
 	// Now it's safe to signal that the job is done.
 	c <- cache
